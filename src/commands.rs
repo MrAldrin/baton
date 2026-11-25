@@ -66,6 +66,42 @@ impl Ctx<'_> {
     }
 }
 
+/// Variables that a Claude Code host (the desktop app, or a Claude Code
+/// session) sets for its own children. A pane that inherits them runs
+/// Claude Code as a child session: for example
+/// `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` turns off its OSC 7501 state
+/// reports. `run` unsets them for the program it starts. Auth and account
+/// variables are kept.
+pub const CLAUDE_HOST_VARS: [&str; 9] = [
+    "CLAUDE_CODE_DISABLE_TERMINAL_TITLE",
+    "CLAUDECODE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_PID",
+];
+
+/// Prefix a command with `env -u VAR …` for [`CLAUDE_HOST_VARS`].
+///
+/// ```
+/// let cmd = baton::commands::without_host_vars(vec!["pi".into()]);
+/// assert_eq!(cmd[..3], ["env", "-u", "CLAUDE_CODE_DISABLE_TERMINAL_TITLE"]);
+/// assert_eq!(cmd.last().unwrap(), "pi");
+/// ```
+#[must_use]
+pub fn without_host_vars(command: Vec<String>) -> Vec<String> {
+    let mut out = vec!["env".to_owned()];
+    for var in CLAUDE_HOST_VARS {
+        out.push("-u".to_owned());
+        out.push(var.to_owned());
+    }
+    out.extend(command);
+    out
+}
+
 /// Arguments of `run`.
 #[derive(Debug, Clone)]
 pub struct RunArgs {
@@ -75,8 +111,6 @@ pub struct RunArgs {
     pub new_tab: Option<String>,
     pub agent: Option<Agent>,
     pub command: Vec<String>,
-    /// This program, for the Claude Code state hooks.
-    pub baton_exe: PathBuf,
 }
 
 /// `baton run`: start a program without focus and record ownership.
@@ -95,11 +129,8 @@ pub fn run(ctx: &Ctx<'_>, args: RunArgs) -> Result<Outcome> {
         Some(a) => agent::with_session_id(a, args.command, agent::new_uuid),
         None => (args.command, None),
     };
-    let command = if args.agent == Some(Agent::Claude) {
-        with_claude_hooks(command, &args.baton_exe)
-    } else {
-        command
-    };
+    // Both paths (floating pane and new tab) start the program through `env`.
+    let command = without_host_vars(command);
 
     let (pane, tab_id) = if let Some(tab_name) = &args.new_tab {
         let tab = ctx.host.new_tab(tab_name, &cwd)?;
@@ -145,22 +176,6 @@ pub fn run(ctx: &Ctx<'_>, args: RunArgs) -> Result<Outcome> {
         out["session_id"] = id.into();
     }
     Ok(Outcome::json(out))
-}
-
-/// Add `--settings` with the state hooks after the program name, so
-/// Claude Code reports state through `baton hook claude`.
-fn with_claude_hooks(mut command: Vec<String>, baton_exe: &std::path::Path) -> Vec<String> {
-    let hook = shell_join(&[
-        baton_exe.to_string_lossy().into_owned(),
-        "hook".into(),
-        "claude".into(),
-    ]);
-    let at = 1.min(command.len());
-    command.splice(
-        at..at,
-        ["--settings".to_owned(), crate::hook::claude_settings(&hook)],
-    );
-    command
 }
 
 /// Wait until the new tab has a terminal pane with a running shell.

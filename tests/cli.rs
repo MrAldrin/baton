@@ -7,14 +7,20 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::cargo_bin_cmd;
+use baton::commands::CLAUDE_HOST_VARS;
 use serde_json::Value;
 use tempfile::TempDir;
 
 const FAKE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/fake-agent.sh");
 
+/// `zellij` without the caller's Zellij and Claude Code host variables, so
+/// test sessions start with the same clean environment as `baton run`.
 fn zellij() -> Command {
     let mut c = Command::new("zellij");
-    for var in ["ZELLIJ", "ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID"] {
+    for var in ["ZELLIJ", "ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID"]
+        .into_iter()
+        .chain(CLAUDE_HOST_VARS)
+    {
         c.env_remove(var);
     }
     c
@@ -28,8 +34,14 @@ struct Session {
 
 impl Session {
     fn new(test: &str) -> Self {
+        Self::with_env(test, &[])
+    }
+
+    /// A session whose server (and so its panes) has extra variables.
+    fn with_env(test: &str, vars: &[(&str, &str)]) -> Self {
         let name = format!("baton-test-{}-{test}", std::process::id());
         let status = zellij()
+            .envs(vars.iter().copied())
             .args(["attach", "--create-background", &name])
             .status()
             .expect("zellij must be installed");
@@ -277,6 +289,19 @@ fn agent_sets_session_id() {
     let (_, v) = s.json(&["list", "--owned"]);
     assert_eq!(v["panes"][0]["agent"], "claude");
     assert_eq!(v["panes"][0]["session_id"], id);
+    let pane = v["panes"][0]["pane"].as_str().unwrap();
+    let rec = std::fs::read_to_string(s.state.path().join(format!("baton/{}~{pane}.json", s.name)))
+        .unwrap();
+    let rec: Value = serde_json::from_str(&rec).unwrap();
+    let cmd: Vec<&str> = rec["command"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a.as_str().unwrap())
+        .collect();
+    assert_eq!(cmd[0], "env");
+    let at = cmd.iter().position(|a| *a == FAKE).unwrap();
+    assert_eq!(cmd[at + 1..], ["--session-id", id]);
 }
 
 #[test]
@@ -304,16 +329,20 @@ fn missing_session() {
 }
 
 #[test]
-fn claude_hook_reports_state_to_the_pane() {
-    let s = Session::new("hook");
+fn run_unsets_claude_host_vars() {
+    let s = Session::with_env(
+        "hostvars",
+        &[
+            ("CLAUDECODE", "1"),
+            ("CLAUDE_CODE_DISABLE_TERMINAL_TITLE", "1"),
+            ("BATON_TEST_KEEP", "1"),
+        ],
+    );
     let cwd = s.work.path().to_str().unwrap();
-    // Act like Claude Code: a process in the pane starts the hook with the
-    // event on stdin and its stdout captured.
-    let script = r#"printf '{"hook_event_name":"PermissionRequest","tool_name":"Bash"}' | "$0" hook claude > /dev/null; sleep 30"#;
     let (code, v) = s.json(&[
         "run",
         "--name",
-        "h",
+        "env",
         "--cwd",
         cwd,
         "--tab-id",
@@ -321,49 +350,21 @@ fn claude_hook_reports_state_to_the_pane() {
         "--",
         "sh",
         "-c",
-        script,
-        env!("CARGO_BIN_EXE_baton"),
+        "env > env.txt; sleep 30",
     ]);
     assert_eq!(code, 0, "{v}");
-    let pane = v["pane"].as_str().unwrap();
-    let (code, v) = s.json(&["wait", pane, "--timeout", "10"]);
-    assert_eq!(code, 2, "{v}");
-    assert_eq!(v["state"], "blocked");
-    assert_eq!(v["app"], "claude");
-    assert_eq!(v["message"], "Bash");
-}
-
-#[test]
-fn hook_is_silent_and_never_fails() {
-    for input in ["not json", r#"{"hook_event_name":"Stop"}"#] {
-        let out = cargo_bin_cmd!("baton")
-            .args(["hook", "claude"])
-            .write_stdin(input)
-            .output()
-            .unwrap();
-        assert_eq!(out.status.code(), Some(0));
-        assert_eq!(out.stdout, b"");
+    let file = s.work.path().join("env.txt");
+    let start = Instant::now();
+    let text = loop {
+        if let Ok(t) = std::fs::read_to_string(&file)
+            && t.contains("BATON_TEST_KEEP")
+        {
+            break t;
+        }
+        assert!(start.elapsed() < Duration::from_secs(10), "no env.txt");
+        sleep(Duration::from_millis(100));
+    };
+    for var in CLAUDE_HOST_VARS {
+        assert!(!text.contains(&format!("{var}=")), "{var} leaked");
     }
-}
-
-#[test]
-fn agent_claude_adds_hook_settings() {
-    let s = Session::new("csettings");
-    let cwd = s.work.path().to_str().unwrap();
-    let (code, v) = s.json(&[
-        "run", "--name", "c", "--cwd", cwd, "--tab-id", "0", "--agent", "claude", "--", FAKE,
-    ]);
-    assert_eq!(code, 0, "{v}");
-    let pane = v["pane"].as_str().unwrap();
-    let rec = std::fs::read_to_string(s.state.path().join(format!("baton/{}~{pane}.json", s.name)))
-        .unwrap();
-    let rec: Value = serde_json::from_str(&rec).unwrap();
-    let cmd = rec["command"].as_array().unwrap();
-    assert_eq!(cmd[1], "--settings");
-    let settings: Value = serde_json::from_str(cmd[2].as_str().unwrap()).unwrap();
-    let hook = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
-        .as_str()
-        .unwrap();
-    assert!(hook.ends_with(" hook claude"), "{hook}");
-    assert_eq!(cmd[3], "--session-id");
 }

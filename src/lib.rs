@@ -6,7 +6,6 @@
 
 pub mod agent;
 pub mod commands;
-pub mod hook;
 pub mod host;
 pub mod keys;
 pub mod pane;

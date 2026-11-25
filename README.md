@@ -36,7 +36,7 @@ Inside Zellij, `--session` defaults to `$ZELLIJ_SESSION_NAME`, and `run` opens a
 
 `--force` is needed to write to or close a pane that `baton` did not start.
 
-`wait` ignores a `done`, `idle`, `error` or `blocked` state reported before the last `send` or `keys`.
+`wait` ignores a `done`, `idle`, `error` or `blocked` state reported before the last `send` or `keys`. Limit: the send time is kept only in the ownership record, so after `send --force` or `keys --force` to a pane `baton` did not start, `wait` can return an old `done` at once.
 
 Output is one JSON object on stdout (`read` prints text unless `--json`). Errors print `{"error": {"message": …}}`.
 
@@ -47,8 +47,9 @@ Ownership records: `$XDG_STATE_HOME/baton/<session>~<pane>.json` (default `~/.lo
 ## Agents
 
 - `--agent pi|claude` adds `--session-id <uuid>`, so a pane can be resumed later (`pi --session <id>`, `claude --resume <id>`).
-- Pi reports its state itself (OSC 7501).
-- Claude Code does not. `--agent claude` adds `--settings` with hooks that call `baton hook claude`. That hidden command writes OSC 7501 to Claude's terminal (Linux only; it finds the terminal through `/proc`). Use the full path of a `baton` binary that stays in place.
+- Pi and Claude Code report their state themselves (OSC 7501).
+- `run` starts every program through `env -u …` without the variables a Claude Code host sets for its children (list: `CLAUDE_HOST_VARS` in `src/commands.rs`). Inherited, they make Claude Code a child session that sends no state (`CLAUDE_CODE_DISABLE_TERMINAL_TITLE`). Auth and account variables are kept.
+- A new, untrusted folder makes Claude Code ask for trust first. That prompt shows as `unknown`, not `blocked`.
 
 ## Repository map
 
@@ -60,6 +61,5 @@ Ownership records: `$XDG_STATE_HOME/baton/<session>~<pane>.json` (default `~/.lo
 | `src/state.rs` | States, the stale-`Done` rule, `wait` exit codes. |
 | `src/store.rs` | Ownership records. |
 | `src/agent.rs` | `--agent` session ids. |
-| `src/hook.rs` | Claude Code hooks → OSC 7501. |
 | `tests/cli.rs` | Integration tests on throwaway Zellij sessions. |
 | `tests/fixtures/` | `list-panes` JSON and the fake OSC 7501 agent. |
