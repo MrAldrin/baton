@@ -4,7 +4,7 @@
 
 Scope: mechanics only. `baton` does not create jj workspaces, read Beads or decide what to do next.
 
-- Spec (authority): `~/projects/agent-workflows/docs/primitives/session-host/host-cli-design.md`
+- Spec (authority): [`docs/design.md`](docs/design.md)
 - Tasks: Beads in the agent-workflows store, `bd -C ~/projects/agent-workflows …` (bead `aw-i96` built v1).
 
 ## Quick start

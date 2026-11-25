@@ -3,7 +3,7 @@
 ## Startup
 
 - Small Rust CLI. One binary, one adapter (Zellij 0.46.1).
-- The spec is the authority: `~/projects/agent-workflows/docs/primitives/session-host/host-cli-design.md`. If code and spec differ, report it; do not guess.
+- The spec is the authority: [`docs/design.md`](docs/design.md). If code and spec differ, report it; do not guess.
 - Tasks live in Beads in the agent-workflows store. Always use `bd -C ~/projects/agent-workflows …`. A direct request selects work; a bead is not permission by itself.
 - `README.md` owns the repo map, verbs and quick start.
 
