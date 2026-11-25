@@ -18,7 +18,7 @@ The CLI holds mechanics only. It does not create jj workspaces, read Beads or de
 
 ## Location and stack
 
-- Repo `~/projects/baton` (created 2026-11-25; local only, no remote yet). This file moved here from agent-workflows on 2026-11-25. Binary and repo name `baton` (owner choice 2026-11-25: a conductor directs with a baton; easy to dictate).
+- Repo `~/projects/baton` (created 2026-11-25; private GitHub repo `MrAldrin/baton`). This file moved here from agent-workflows on 2026-11-25. Binary and repo name `baton` (owner choice 2026-11-25: a conductor directs with a baton; easy to dictate).
 - Rust stack and check baseline: `~/projects/agent-workflows/docs/our-working-model/dev-stack.md` (section "Rust"). Dependencies so far: clap (derive), serde, serde_json, anyhow.
 - `my_programs` installs it later (symlink in `~/.local/bin`). Skills call `baton`, never `zellij`, once `aw-2k0` is done.
 
