@@ -80,4 +80,13 @@ jobs:
           BATON_REQUIRE_ZELLIJ: "1"
         run: |
           zellij --version
-          cargo nextest run --no-fail-fast --test cli
+          cargo nextest run --no-fail-fast --test cli --retries 0 --test-threads 1
+      # Evidence only: the same tests in parallel, which failed now and then
+      # on the Windows runner (a session that never got ready).
+      - name: Tests with Zellij in parallel (Windows, evidence)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          BATON_REQUIRE_ZELLIJ: "1"
+        run: cargo nextest run --no-fail-fast --test cli --retries 0

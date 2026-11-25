@@ -97,10 +97,15 @@ impl Session {
         // Wait until the session answers. A Windows CI runner with several
         // sessions in parallel can take more than 10 s.
         let start = Instant::now();
-        while s.baton(&["list"]).0 != 0 {
+        loop {
+            let (code, out) = s.baton(&["list"]);
+            if code == 0 {
+                break;
+            }
             assert!(
                 start.elapsed() < Duration::from_secs(30),
-                "session not ready"
+                "session {} not ready: {out}",
+                s.name
             );
             sleep(Duration::from_millis(100));
         }
