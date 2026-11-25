@@ -25,9 +25,23 @@ impl Zellij {
     /// # Errors
     /// The session does not exist or has exited, or `zellij` cannot run.
     pub fn connect(session: &str) -> Result<Self> {
-        let out = run(Command::new("zellij").args(["list-sessions", "--no-formatting"]))
-            .context("cannot list Zellij sessions")?;
+        let out = Command::new("zellij")
+            .args(["list-sessions", "--no-formatting"])
+            .output()
+            .context("cannot run zellij")?;
         let text = String::from_utf8_lossy(&out.stdout);
+        if !out.status.success() {
+            // With no sessions at all, Zellij exits 1.
+            let err = String::from_utf8_lossy(&out.stderr);
+            if format!("{text}{err}").contains("No active zellij sessions") {
+                bail!("Zellij session {session:?} not found");
+            }
+            bail!(
+                "cannot list Zellij sessions ({}): {}",
+                out.status,
+                err.trim()
+            );
+        }
         let line = text
             .lines()
             .find(|l| l.split_whitespace().next() == Some(session));
