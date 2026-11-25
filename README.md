@@ -5,6 +5,7 @@
 Scope: mechanics only. `baton` does not create jj workspaces, read Beads or decide what to do next.
 
 - Spec (authority): [`docs/design.md`](docs/design.md)
+- Agent skill: [`skills/using-baton/SKILL.md`](skills/using-baton/SKILL.md)
 - Tasks: Beads in the agent-workflows store, `bd -C ~/projects/agent-workflows …` (bead `aw-i96` built v1).
 
 ## Quick start
