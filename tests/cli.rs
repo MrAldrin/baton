@@ -94,11 +94,12 @@ impl Session {
             state: tempfile::tempdir().unwrap(),
             work: tempfile::tempdir().unwrap(),
         };
-        // Wait until the session answers.
+        // Wait until the session answers. A Windows CI runner with several
+        // sessions in parallel can take more than 10 s.
         let start = Instant::now();
         while s.baton(&["list"]).0 != 0 {
             assert!(
-                start.elapsed() < Duration::from_secs(10),
+                start.elapsed() < Duration::from_secs(30),
                 "session not ready"
             );
             sleep(Duration::from_millis(100));
