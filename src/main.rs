@@ -109,6 +109,12 @@ enum Verb {
         #[arg(long)]
         owned: bool,
     },
+    /// Internal: called by agent hooks to report state (OSC 7501).
+    #[command(hide = true)]
+    Hook {
+        #[arg(value_enum)]
+        agent: Agent,
+    },
     /// Close a pane baton started, and remove its record.
     Close {
         pane: PaneId,
@@ -130,6 +136,10 @@ fn main() -> ExitCode {
             return ExitCode::from(ERROR_EXIT);
         }
     };
+    if let Verb::Hook { agent } = cli.verb {
+        hook(agent);
+        return ExitCode::SUCCESS;
+    }
     match execute(cli) {
         Ok(out) => {
             let mut stdout = std::io::stdout().lock();
@@ -143,6 +153,25 @@ fn main() -> ExitCode {
             print_error(&format!("{e:#}"));
             ExitCode::from(ERROR_EXIT)
         }
+    }
+}
+
+/// Report an agent hook event as OSC 7501. Never fails and prints nothing:
+/// a failing or talking hook can block the agent.
+fn hook(agent: Agent) {
+    use std::io::Read;
+    let mut input = String::new();
+    let _ = std::io::stdin().read_to_string(&mut input);
+    let Ok(event) = serde_json::from_str::<serde_json::Value>(&input) else {
+        return;
+    };
+    let report = match agent {
+        Agent::Claude => baton::hook::claude_report(&event),
+        Agent::Pi => None,
+    };
+    if let Some(r) = report {
+        let _ =
+            baton::hook::write_to_agent_terminal(baton::hook::osc(&r, agent.program()).as_bytes());
     }
 }
 
@@ -191,6 +220,7 @@ fn execute(cli: Cli) -> Result<commands::Outcome> {
                 new_tab,
                 agent,
                 command,
+                baton_exe: std::env::current_exe()?,
             },
         ),
         Verb::Send {
@@ -220,5 +250,6 @@ fn execute(cli: Cli) -> Result<commands::Outcome> {
         }
         Verb::List { owned } => commands::list(&ctx, owned),
         Verb::Close { pane, force } => commands::close(&ctx, pane, force),
+        Verb::Hook { .. } => unreachable!("handled in main"),
     }
 }

@@ -12,6 +12,7 @@
 - Version control: jj. Commit titles end with the bead id, for example `(aw-i96)`.
 - Keep multiplexer calls in an adapter behind `host::Host`. Verbs never call `zellij` directly.
 - Zellij exits 0 for an unknown session or pane. Check that a session or pane exists before acting on it.
+- `baton hook` runs inside agent hooks. It must exit 0 and print nothing: a failing hook blocks Claude's prompt, and hook stdout can be read as a decision.
 - Stack: clap derive, serde, anyhow, no async runtime. Tests: cargo-nextest, assert_cmd, insta.
 - Distinguish planned, implemented and verified.
 

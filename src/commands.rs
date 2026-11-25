@@ -75,6 +75,8 @@ pub struct RunArgs {
     pub new_tab: Option<String>,
     pub agent: Option<Agent>,
     pub command: Vec<String>,
+    /// This program, for the Claude Code state hooks.
+    pub baton_exe: PathBuf,
 }
 
 /// `baton run`: start a program without focus and record ownership.
@@ -92,6 +94,11 @@ pub fn run(ctx: &Ctx<'_>, args: RunArgs) -> Result<Outcome> {
     let (command, session_id) = match args.agent {
         Some(a) => agent::with_session_id(a, args.command, agent::new_uuid),
         None => (args.command, None),
+    };
+    let command = if args.agent == Some(Agent::Claude) {
+        with_claude_hooks(command, &args.baton_exe)
+    } else {
+        command
     };
 
     let (pane, tab_id) = if let Some(tab_name) = &args.new_tab {
@@ -138,6 +145,22 @@ pub fn run(ctx: &Ctx<'_>, args: RunArgs) -> Result<Outcome> {
         out["session_id"] = id.into();
     }
     Ok(Outcome::json(out))
+}
+
+/// Add `--settings` with the state hooks after the program name, so
+/// Claude Code reports state through `baton hook claude`.
+fn with_claude_hooks(mut command: Vec<String>, baton_exe: &std::path::Path) -> Vec<String> {
+    let hook = shell_join(&[
+        baton_exe.to_string_lossy().into_owned(),
+        "hook".into(),
+        "claude".into(),
+    ]);
+    let at = 1.min(command.len());
+    command.splice(
+        at..at,
+        ["--settings".to_owned(), crate::hook::claude_settings(&hook)],
+    );
+    command
 }
 
 /// Wait until the new tab has a terminal pane with a running shell.
@@ -220,7 +243,13 @@ pub fn keys(ctx: &Ctx<'_>, pane: PaneId, names: &[String], force: bool) -> Resul
         .map(|k| key_bytes(k))
         .collect::<Result<Vec<_>>>()?;
     ctx.host.find_pane(pane)?;
-    ctx.owned_or_forced(pane, force)?;
+    let rec = ctx.owned_or_forced(pane, force)?;
+    // Keys can start a turn (Enter, or an answer to a prompt): record the
+    // time like `send`, so `wait` ignores the old state.
+    if let Some(mut r) = rec {
+        r.last_send_ms = Some(now_ms());
+        ctx.store.save(&r)?;
+    }
     for b in bytes {
         ctx.host.write_bytes(pane, b)?;
     }

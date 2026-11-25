@@ -56,16 +56,17 @@ impl Status {
 
     /// True when `wait` may stop on this status.
     ///
-    /// The state must be in `until`. `done`, `idle` and `error` count only
-    /// when `updated_ms` is at or after the last send, because `Done` stays
-    /// latched until the next turn (stale `Done`). Other states always count.
+    /// The state must be in `until`. `done`, `idle`, `error` and `blocked`
+    /// count only when `updated_ms` is at or after the last send or keys,
+    /// because a reported state stays latched until the program reports
+    /// again (stale `Done`, stale `Blocked`). `exited` always counts.
     #[must_use]
     pub fn satisfies(&self, until: &[State], last_send_ms: Option<u64>) -> bool {
         if !until.contains(&self.state) {
             return false;
         }
         match (self.state, last_send_ms) {
-            (State::Done | State::Idle | State::Error, Some(sent)) => {
+            (State::Done | State::Idle | State::Error | State::Blocked, Some(sent)) => {
                 self.updated_ms.is_some_and(|u| u >= sent)
             }
             _ => true,
@@ -129,6 +130,12 @@ mod tests {
         assert!(!st(State::Error, Some(1)).satisfies(&until, Some(2)));
         assert!(!st(State::Idle, None).satisfies(&until, Some(2)));
         assert!(st(State::Idle, Some(3)).satisfies(&until, Some(2)));
+    }
+
+    #[test]
+    fn blocked_before_send_is_stale() {
+        assert!(!st(State::Blocked, Some(100)).satisfies(&ALL, Some(200)));
+        assert!(st(State::Blocked, Some(200)).satisfies(&ALL, Some(200)));
     }
 
     #[test]

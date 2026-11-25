@@ -186,8 +186,10 @@ fn blocked_then_keys() {
     assert_eq!(code, 3);
     assert!(v["error"]["message"].as_str().unwrap().contains("blocked"));
 
+    // keys records the time, so the old Blocked is stale and wait goes on
+    // to the new Done.
     assert_eq!(s.json(&["keys", &pane, "1", "enter"]).0, 0);
-    let (code, v) = s.json(&["wait", &pane, "--until", "done", "--timeout", "10"]);
+    let (code, v) = s.json(&["wait", &pane, "--timeout", "10"]);
     assert_eq!(code, 0, "{v}");
     let (_, text) = s.baton(&["read", &pane]);
     assert!(text.contains("answer: 1"), "{text:?}");
@@ -299,4 +301,69 @@ fn missing_session() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(3));
+}
+
+#[test]
+fn claude_hook_reports_state_to_the_pane() {
+    let s = Session::new("hook");
+    let cwd = s.work.path().to_str().unwrap();
+    // Act like Claude Code: a process in the pane starts the hook with the
+    // event on stdin and its stdout captured.
+    let script = r#"printf '{"hook_event_name":"PermissionRequest","tool_name":"Bash"}' | "$0" hook claude > /dev/null; sleep 30"#;
+    let (code, v) = s.json(&[
+        "run",
+        "--name",
+        "h",
+        "--cwd",
+        cwd,
+        "--tab-id",
+        "0",
+        "--",
+        "sh",
+        "-c",
+        script,
+        env!("CARGO_BIN_EXE_baton"),
+    ]);
+    assert_eq!(code, 0, "{v}");
+    let pane = v["pane"].as_str().unwrap();
+    let (code, v) = s.json(&["wait", pane, "--timeout", "10"]);
+    assert_eq!(code, 2, "{v}");
+    assert_eq!(v["state"], "blocked");
+    assert_eq!(v["app"], "claude");
+    assert_eq!(v["message"], "Bash");
+}
+
+#[test]
+fn hook_is_silent_and_never_fails() {
+    for input in ["not json", r#"{"hook_event_name":"Stop"}"#] {
+        let out = cargo_bin_cmd!("baton")
+            .args(["hook", "claude"])
+            .write_stdin(input)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0));
+        assert_eq!(out.stdout, b"");
+    }
+}
+
+#[test]
+fn agent_claude_adds_hook_settings() {
+    let s = Session::new("csettings");
+    let cwd = s.work.path().to_str().unwrap();
+    let (code, v) = s.json(&[
+        "run", "--name", "c", "--cwd", cwd, "--tab-id", "0", "--agent", "claude", "--", FAKE,
+    ]);
+    assert_eq!(code, 0, "{v}");
+    let pane = v["pane"].as_str().unwrap();
+    let rec = std::fs::read_to_string(s.state.path().join(format!("baton/{}~{pane}.json", s.name)))
+        .unwrap();
+    let rec: Value = serde_json::from_str(&rec).unwrap();
+    let cmd = rec["command"].as_array().unwrap();
+    assert_eq!(cmd[1], "--settings");
+    let settings: Value = serde_json::from_str(cmd[2].as_str().unwrap()).unwrap();
+    let hook = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap();
+    assert!(hook.ends_with(" hook claude"), "{hook}");
+    assert_eq!(cmd[3], "--session-id");
 }
