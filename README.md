@@ -36,13 +36,13 @@ Inside Zellij, `--session` defaults to `$ZELLIJ_SESSION_NAME`, and `run` opens a
 
 `--force` is needed to write to or close a pane that `baton` did not start.
 
-`wait` ignores a `done`, `idle`, `error` or `blocked` state reported before the last `send` or `keys`. Limit: the send time is kept only in the ownership record, so after `send --force` or `keys --force` to a pane `baton` did not start, `wait` can return an old `done` at once.
+`wait` ignores a `done`, `idle`, `error` or `blocked` state reported before the last `send` or `keys`. A forced `send` or `keys` to a pane `baton` did not start writes a minimal record (`owned: false`) that only keeps the send time; the pane stays not owned.
 
 Output is one JSON object on stdout (`read` prints text unless `--json`). Errors print `{"error": {"message": …}}`.
 
 Exit codes: `0` done or idle, `1` error or exited, `2` blocked, `124` timeout, `3` other error.
 
-Ownership records: `$XDG_STATE_HOME/baton/<session>~<pane>.json` (default `~/.local/state/baton/`).
+Records: `$XDG_STATE_HOME/baton/<session>~<pane>.json` (default `~/.local/state/baton/`).
 
 ## Agents
 

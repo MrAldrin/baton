@@ -56,13 +56,35 @@ impl Ctx<'_> {
         self.store.load(self.session(), pane)
     }
 
-    /// The record of an owned pane; `None` with `force` for other panes.
-    fn owned_or_forced(&self, pane: PaneId, force: bool) -> Result<Option<Record>> {
-        let rec = self.record(pane)?;
-        if rec.is_none() && !force {
+    /// Refuse a pane `baton` did not start, unless `force`.
+    fn check_owned(&self, pane: PaneId, force: bool) -> Result<()> {
+        let owned = self.record(pane)?.is_some_and(|r| r.owned);
+        if !owned && !force {
             bail!("pane {pane} was not started by baton; use --force to act on it anyway");
         }
-        Ok(rec)
+        Ok(())
+    }
+
+    /// Store the send time for `wait`. A pane without a record (a forced
+    /// send) gets a minimal record with `owned: false`.
+    fn record_send(&self, info: &PaneInfo) -> Result<u64> {
+        let now = now_ms();
+        let mut rec = self.record(info.pane)?.unwrap_or_else(|| Record {
+            owned: false,
+            session: self.session().to_owned(),
+            pane: info.pane,
+            name: info.name.clone(),
+            cwd: info.cwd.clone().unwrap_or_default().into(),
+            command: Vec::new(),
+            agent: None,
+            session_id: None,
+            tab_id: info.tab_id.unwrap_or_default(),
+            started_ms: now,
+            last_send_ms: None,
+        });
+        rec.last_send_ms = Some(now);
+        self.store.save(&rec)?;
+        Ok(now)
     }
 }
 
@@ -160,6 +182,7 @@ pub fn run(ctx: &Ctx<'_>, args: RunArgs) -> Result<Outcome> {
     };
 
     ctx.store.save(&Record {
+        owned: true,
         session: ctx.session().to_owned(),
         pane,
         name: args.name,
@@ -222,26 +245,29 @@ pub fn shell_join(words: &[String]) -> String {
         .join(" ")
 }
 
+/// Pause between the text and Enter in `send`.
+const ENTER_DELAY: Duration = Duration::from_millis(200);
+
 /// `baton send`: type text and submit it.
 ///
 /// # Errors
 /// The pane is not owned or is busy (without `force`), or the host fails.
 pub fn send(ctx: &Ctx<'_>, pane: PaneId, text: &str, enter: bool, force: bool) -> Result<Outcome> {
     let info = ctx.host.find_pane(pane)?;
-    let rec = ctx.owned_or_forced(pane, force)?;
+    ctx.check_owned(pane, force)?;
     if !force && matches!(info.status.state, State::Working | State::Blocked) {
         bail!(
             "pane {pane} is {}; use --force to send anyway",
             state_name(info.status.state)
         );
     }
-    let sent = now_ms();
-    if let Some(mut r) = rec {
-        r.last_send_ms = Some(sent);
-        ctx.store.save(&r)?;
-    }
+    let sent = ctx.record_send(&info)?;
     ctx.host.write_text(pane, text)?;
     if enter {
+        // Claude Code can take text and an Enter that arrive together as
+        // one paste and drop the Enter (about 1 in 5 live tries). A short
+        // pause makes the Enter a separate key press.
+        sleep(ENTER_DELAY);
         ctx.host.write_bytes(pane, b"\r")?;
     }
     Ok(Outcome::json(json!({ "pane": pane, "sent_ms": sent })))
@@ -257,14 +283,11 @@ pub fn keys(ctx: &Ctx<'_>, pane: PaneId, names: &[String], force: bool) -> Resul
         .iter()
         .map(|k| key_bytes(k))
         .collect::<Result<Vec<_>>>()?;
-    ctx.host.find_pane(pane)?;
-    let rec = ctx.owned_or_forced(pane, force)?;
+    let info = ctx.host.find_pane(pane)?;
+    ctx.check_owned(pane, force)?;
     // Keys can start a turn (Enter, or an answer to a prompt): record the
     // time like `send`, so `wait` ignores the old state.
-    if let Some(mut r) = rec {
-        r.last_send_ms = Some(now_ms());
-        ctx.store.save(&r)?;
-    }
+    ctx.record_send(&info)?;
     for b in bytes {
         ctx.host.write_bytes(pane, b)?;
     }
@@ -369,7 +392,7 @@ pub fn list(ctx: &Ctx<'_>, owned_only: bool) -> Result<Outcome> {
     let mut rows = Vec::new();
     for p in ctx.host.list_panes()? {
         let rec = ctx.record(p.pane)?;
-        if owned_only && rec.is_none() {
+        if owned_only && !rec.as_ref().is_some_and(|r| r.owned) {
             continue;
         }
         rows.push(list_row(&p, rec.as_ref()));
@@ -385,7 +408,7 @@ fn list_row(p: &PaneInfo, rec: Option<&Record>) -> Value {
         "cwd": p.cwd,
         "tab_id": p.tab_id,
         "state": p.status.state,
-        "owned": rec.is_some(),
+        "owned": rec.is_some_and(|r| r.owned),
         "agent": rec.and_then(|r| r.agent),
         "session_id": rec.and_then(|r| r.session_id.clone()),
     })
@@ -403,7 +426,7 @@ pub fn close(ctx: &Ctx<'_>, pane: PaneId, force: bool) -> Result<Outcome> {
         ctx.store.remove(ctx.session(), pane)?;
         return Err(e);
     }
-    ctx.owned_or_forced(pane, force)?;
+    ctx.check_owned(pane, force)?;
     ctx.host.close_pane(pane)?;
     ctx.store.remove(ctx.session(), pane)?;
     Ok(Outcome::json(json!({ "pane": pane, "closed": true })))
@@ -495,6 +518,7 @@ mod tests {
     fn owned(store: &Store, last_send_ms: Option<u64>) {
         store
             .save(&Record {
+                owned: true,
                 session: "fake".into(),
                 pane: PaneId(1),
                 name: "a".into(),
@@ -604,6 +628,38 @@ mod tests {
                 .last_send_ms
                 .is_some()
         );
+    }
+
+    #[test]
+    fn forced_send_keeps_send_time_without_ownership() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::at(tmp.path().into());
+        let host = FakeHost::new(vec![st(State::Done, 5)]);
+        let ctx = Ctx {
+            host: &host,
+            store: &store,
+            caller_pane: None,
+        };
+        send(&ctx, PaneId(1), "hi", true, true).unwrap();
+        let rec = store.load("fake", PaneId(1)).unwrap().unwrap();
+        assert!(!rec.owned);
+        assert!(rec.last_send_ms.is_some());
+        // Still not owned: no plain send, no --owned listing.
+        assert!(send(&ctx, PaneId(1), "hi", true, false).is_err());
+        let Output::Json(v) = list(&ctx, true).unwrap().output else {
+            panic!()
+        };
+        assert_eq!(v["panes"], json!([]));
+        // The old Done (updated_ms 5) is stale now.
+        let out = wait(
+            &ctx,
+            PaneId(1),
+            &UNTIL,
+            Some(Duration::from_millis(20)),
+            POLL,
+        )
+        .unwrap();
+        assert_eq!(out.code, 124);
     }
 
     #[test]

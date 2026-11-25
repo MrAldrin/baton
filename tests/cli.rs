@@ -249,6 +249,15 @@ fn ownership_refusal_and_errors() {
         assert!(msg.contains("not started by baton"), "{msg}");
     }
 
+    // A forced send works and keeps the send time, but the pane stays
+    // not owned.
+    let (code, v) = s.json(&["send", "terminal_0", "true", "--force"]);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(s.records(), 1);
+    let (_, v) = s.json(&["list"]);
+    assert_eq!(v["panes"][0]["owned"], false);
+    assert_eq!(s.json(&["close", "terminal_0"]).0, 3);
+
     let (code, v) = s.json(&["status", "terminal_99"]);
     assert_eq!(code, 3);
     assert!(

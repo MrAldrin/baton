@@ -9,9 +9,15 @@ use serde::{Deserialize, Serialize};
 use crate::agent::Agent;
 use crate::pane::PaneId;
 
-/// What `baton run` recorded about a pane.
+/// What `baton` recorded about a pane.
+///
+/// `baton run` writes a full record with `owned: true`. A forced `send` or
+/// `keys` to a pane `baton` did not start writes a minimal record with
+/// `owned: false`, only to keep the send time for `wait`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Record {
+    #[serde(default = "yes")]
+    pub owned: bool,
     pub session: String,
     pub pane: PaneId,
     pub name: String,
@@ -22,6 +28,10 @@ pub struct Record {
     pub tab_id: u64,
     pub started_ms: u64,
     pub last_send_ms: Option<u64>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// The folder with the records.
@@ -114,10 +124,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn old_records_are_owned() {
+        let text = r#"{"session":"s","pane":"terminal_1","name":"n","cwd":"/","command":[],
+            "agent":null,"session_id":null,"tab_id":0,"started_ms":1,"last_send_ms":null}"#;
+        let rec: Record = serde_json::from_str(text).unwrap();
+        assert!(rec.owned);
+    }
+
+    #[test]
     fn save_load_remove() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::at(tmp.path().join("baton"));
         let rec = Record {
+            owned: true,
             session: "s".into(),
             pane: PaneId(4),
             name: "n".into(),
