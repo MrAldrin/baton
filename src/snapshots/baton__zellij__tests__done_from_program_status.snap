@@ -1,0 +1,12 @@
+---
+source: src/zellij.rs
+expression: "pane(&panes, 1).status"
+---
+{
+  "state": "done",
+  "source": "program",
+  "app": null,
+  "message": null,
+  "updated_ms": 1795637391992,
+  "exit_code": null
+}

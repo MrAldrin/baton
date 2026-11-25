@@ -1,0 +1,12 @@
+---
+source: src/zellij.rs
+expression: "pane(&panes, 2).status"
+---
+{
+  "state": "exited",
+  "source": "pane",
+  "app": null,
+  "message": null,
+  "updated_ms": null,
+  "exit_code": 7
+}

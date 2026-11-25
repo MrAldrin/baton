@@ -1,0 +1,12 @@
+---
+source: src/zellij.rs
+expression: "pane(&panes, 12).status"
+---
+{
+  "state": "blocked",
+  "source": "program",
+  "app": "fake",
+  "message": "need ok",
+  "updated_ms": 1795637430395,
+  "exit_code": null
+}
