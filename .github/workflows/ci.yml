@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  ZELLIJ_VERSION: v0.46.1
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.100"
+          components: rustfmt, clippy
+      - uses: taiki-e/install-action@nextest
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --doc
+
+      # Linux: Zellij is required, so the integration tests must run.
+      - name: Install Zellij (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          base="https://github.com/zellij-org/zellij/releases/download/$ZELLIJ_VERSION"
+          curl -fsSL -o zellij.tar.gz "$base/zellij-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL -o zellij.sha256 "$base/zellij-x86_64-unknown-linux-gnu.sha256sum"
+          mkdir -p "$HOME/zellij-bin"
+          tar -xzf zellij.tar.gz -C "$HOME/zellij-bin"
+          # The checksum file names the build path, so compare hashes only.
+          want=$(cut -d' ' -f1 zellij.sha256)
+          got=$(sha256sum "$HOME/zellij-bin/zellij" | cut -d' ' -f1)
+          test "$want" = "$got"
+          echo "$HOME/zellij-bin" >> "$GITHUB_PATH"
+      - name: Tests with Zellij (Linux)
+        if: runner.os == 'Linux'
+        env:
+          BATON_REQUIRE_ZELLIJ: "1"
+          TERM: xterm-256color
+        run: cargo nextest run --no-fail-fast
+
+      # Windows: the required run has no Zellij, so the Zellij tests skip
+      # and the unit tests and `baton exec` test run.
+      - name: Tests without Zellij (Windows)
+        if: runner.os == 'Windows'
+        run: cargo nextest run --no-fail-fast
+      # Then a best-effort run against the native Zellij build. A failure
+      # here does not fail CI; the result is recorded in the bead.
+      - name: Install Zellij (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $base = "https://github.com/zellij-org/zellij/releases/download/$env:ZELLIJ_VERSION"
+          Invoke-WebRequest "$base/zellij-x86_64-pc-windows-msvc.zip" -OutFile zellij.zip
+          Invoke-WebRequest "$base/zellij-x86_64-pc-windows-msvc.sha256sum" -OutFile zellij.sha256
+          $dir = "$env:RUNNER_TEMP\zellij-bin"
+          Expand-Archive zellij.zip -DestinationPath $dir
+          Get-ChildItem $dir -Recurse | Select-Object FullName
+          $exe = Get-ChildItem $dir -Recurse -Filter zellij.exe | Select-Object -First 1
+          $want = (Get-Content zellij.sha256 | Where-Object { $_ -match 'zellij\.exe$' }).Split(' ')[0]
+          $got = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+          if ($want -ne $got) { throw "zellij.exe checksum mismatch: $got" }
+          $exe.DirectoryName | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Tests with Zellij (Windows, best effort)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          BATON_REQUIRE_ZELLIJ: "1"
+        run: |
+          zellij --version
+          cargo nextest run --no-fail-fast --test cli

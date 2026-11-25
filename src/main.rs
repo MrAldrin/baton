@@ -11,6 +11,7 @@ use clap::{Parser, Subcommand};
 
 use baton::agent::Agent;
 use baton::commands::{self, Ctx, Output, RunArgs};
+use baton::launch;
 use baton::pane::PaneId;
 use baton::state::State;
 use baton::store::Store;
@@ -116,6 +117,13 @@ enum Verb {
         #[arg(long)]
         force: bool,
     },
+    /// Start a program without the Claude Code host variables, and exit
+    /// with its exit code. `run` uses this inside the pane on Windows.
+    #[command(hide = true)]
+    Exec {
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -152,6 +160,11 @@ fn print_error(message: &str) {
 }
 
 fn execute(cli: Cli) -> Result<commands::Outcome> {
+    // `exec` runs inside a pane and needs no session.
+    if let Verb::Exec { command } = &cli.verb {
+        let code = launch::exec(command)?;
+        std::process::exit(code);
+    }
     let env_session = std::env::var("ZELLIJ_SESSION_NAME")
         .ok()
         .filter(|s| !s.is_empty());
@@ -220,5 +233,6 @@ fn execute(cli: Cli) -> Result<commands::Outcome> {
         }
         Verb::List { owned } => commands::list(&ctx, owned),
         Verb::Close { pane, force } => commands::close(&ctx, pane, force),
+        Verb::Exec { .. } => unreachable!("handled above"),
     }
 }

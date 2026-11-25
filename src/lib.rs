@@ -8,6 +8,7 @@ pub mod agent;
 pub mod commands;
 pub mod host;
 pub mod keys;
+pub mod launch;
 pub mod pane;
 pub mod state;
 pub mod store;

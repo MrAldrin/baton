@@ -55,6 +55,7 @@ One JSON file per pane in `$XDG_STATE_HOME/baton/` (default `~/.local/state/bato
 - `--agent claude` and `--agent pi` set a session id at start where the agent supports it, so a pane can be resumed later. The implementer checks the installed flags (`claude --help`, `pi --help`) and records the result.
 - Checked 2026-11-25: Claude Code 2.1.316 `--session-id <uuid>` (must be a UUID; resume with `--resume <id>`); Pi 1.6.0 `--session-id <id>` (resume with `--session <id>`). `baton` adds a UUID v4 unless the command already gives a session id or resumes one.
 - `run` starts every program through `env -u …` without the variables that a Claude Code host (the desktop app, or a Claude Code session) sets for its children: `CLAUDE_CODE_DISABLE_TERMINAL_TITLE`, `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_HOST_SESSION_ID`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_PID` (one constant, `CLAUDE_HOST_VARS`). Inherited, they make Claude Code a child session: `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` turns off its OSC 7501 reports, and its transcript is not saved. Auth and account variables are kept. Checked 2026-11-25: with them unset, Claude Code 2.1.316 reports `idle`, `working`, `done` and `blocked` (with a message such as `approve Bash: …`) as app `claude-code`.
+- Windows (bead `aw-n8x.2`): a pane inherits the environment of the Zellij server, not of `baton`, so `Command::env_remove` on `baton`'s own `zellij` call cannot clear the variables. The launcher must run inside the pane. Unix keeps `env -u …`. Windows has no `env`, so `run` starts `<baton.exe> exec -- <cmd…>`: the hidden verb `exec` removes `CLAUDE_HOST_VARS` with `Command::env_remove`, starts the program, waits and exits with its exit code. `exec` ignores Ctrl-C with a console handler (not inherited), so it does not exit before its child. `--cwd` loses the `\\?\` prefix that `canonicalize` adds on Windows.
 - `send` never types into a `blocked` pane without `--force`. `keys` never picks an "always" or "don't ask again" option; that choice stays with a person or the Lead.
 
 ## Rules
@@ -75,6 +76,9 @@ One JSON file per pane in `$XDG_STATE_HOME/baton/` (default `~/.local/state/bato
 - `zellij --session S action …` exits 0 for an unknown session (it prints the session list on stdout) and for an unknown pane id. `baton` checks that the session (`list-sessions`) and the pane (`list-panes`) exist first.
 - An exited pane clears `program_status`; `attention.status` is then `Failed`, so the `exited` check comes first.
 
+- `--new-tab` types the command into the tab's shell. Unix: POSIX quoting. Windows: the shell is found from the pane command: PowerShell (`pwsh`, `powershell`) gets `& 'word' …` (a `'` is doubled); `cmd.exe` gets `"word"` and refuses words with `"`, `%` or a line break; any other shell gets POSIX quoting.
+- Windows (ConPTY) is not checked live yet: whether OSC 7501 passes through ConPTY to Zellij, and whether `list-panes --json` and `dump-screen` behave as on Linux. See bead `aw-n8x.2`.
+
 ## Not in v1
 
 `events` stream, SSH (`ssh host baton …`), status hooks, Claude Code background sessions, Rex and T3 Code adapters, a Zellij plugin.
@@ -83,7 +87,8 @@ One JSON file per pane in `$XDG_STATE_HOME/baton/` (default `~/.local/state/bato
 
 - Check baseline passes: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` (pedantic as warnings), `cargo nextest run`, `cargo test --doc`.
 - Unit tests: state mapping and the stale-`Done` rule, from recorded `list-panes` JSON fixtures.
-- Integration tests (assert_cmd) against a throwaway background session `baton-test-<pid>`, deleted afterwards. A fake agent script prints OSC 7501 (`printf '\033]7501;state=working\033\\'` … `state=done`) so tests need no model. Cover run, send, keys, read, status, wait (including stale `Done` and timeout), list, close and the ownership refusal.
+- Integration tests (assert_cmd) against a throwaway background session `baton-test-<pid>`, deleted afterwards. A fake agent (`examples/fake_agent.rs`, Rust so it runs on Windows too) prints OSC 7501 (`ESC ] 7501 ; state=working:app=fake ESC \` … `state=done`) so tests need no model. Tests that need Zellij 0.46.1 skip when it is not on `PATH`, unless `BATON_REQUIRE_ZELLIJ` is set.
+- CI (`.github/workflows/ci.yml`): `ubuntu-latest` and `windows-latest` run the check baseline. Linux installs Zellij 0.46.1 and requires the integration tests; Windows runs them against the official Windows build as best effort. Cover run, send, keys, read, status, wait (including stale `Done` and timeout), list, close and the ownership refusal.
 - One manual live check each with Pi and Claude Code: run, send, wait, read.
 
 ## Background

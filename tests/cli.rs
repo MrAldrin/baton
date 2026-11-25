@@ -1,8 +1,15 @@
 //! Integration tests: the real binary against a throwaway background Zellij
 //! session `baton-test-<pid>-<test>`. The session is deleted on drop, also
-//! when a test fails. A fake agent script reports OSC 7501 state.
+//! when a test fails. A fake agent (`examples/fake_agent.rs`) reports OSC
+//! 7501 state.
+//!
+//! Tests that need Zellij 0.46.1 skip themselves when it is not on `PATH`,
+//! unless `BATON_REQUIRE_ZELLIJ` is set (CI sets it where Zellij is
+//! installed); then a missing Zellij fails them.
 
+use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -11,7 +18,39 @@ use baton::commands::CLAUDE_HOST_VARS;
 use serde_json::Value;
 use tempfile::TempDir;
 
-const FAKE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/fake-agent.sh");
+/// The fake agent, built by Cargo as an example in the `examples` folder
+/// next to the `baton` binary (`target/<profile>/examples/`).
+fn fake() -> String {
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_baton"));
+    let dir = exe.parent().unwrap().join("examples");
+    let path: PathBuf = dir.join(format!("fake_agent{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        path.exists(),
+        "{} is missing: run `cargo build --examples`",
+        path.display()
+    );
+    path.to_string_lossy().into_owned()
+}
+
+/// Whether Zellij 0.46.1 is on `PATH`. Without it, tests skip, or fail when
+/// `BATON_REQUIRE_ZELLIJ` is set.
+fn have_zellij() -> bool {
+    static FOUND: OnceLock<bool> = OnceLock::new();
+    let found = *FOUND.get_or_init(|| {
+        Command::new("zellij")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("0.46.1"))
+    });
+    if !found {
+        assert!(
+            std::env::var_os("BATON_REQUIRE_ZELLIJ").is_none(),
+            "BATON_REQUIRE_ZELLIJ is set, but zellij 0.46.1 is not on PATH"
+        );
+        eprintln!("skipped: zellij 0.46.1 is not on PATH");
+    }
+    found
+}
 
 /// `zellij` without the caller's Zellij and Claude Code host variables, so
 /// test sessions start with the same clean environment as `baton run`.
@@ -33,12 +72,16 @@ struct Session {
 }
 
 impl Session {
-    fn new(test: &str) -> Self {
+    /// A new session, or `None` when Zellij is missing (the test skips).
+    fn new(test: &str) -> Option<Self> {
         Self::with_env(test, &[])
     }
 
     /// A session whose server (and so its panes) has extra variables.
-    fn with_env(test: &str, vars: &[(&str, &str)]) -> Self {
+    fn with_env(test: &str, vars: &[(&str, &str)]) -> Option<Self> {
+        if !have_zellij() {
+            return None;
+        }
         let name = format!("baton-test-{}-{test}", std::process::id());
         let status = zellij()
             .envs(vars.iter().copied())
@@ -60,7 +103,7 @@ impl Session {
             );
             sleep(Duration::from_millis(100));
         }
-        s
+        Some(s)
     }
 
     /// Run baton; return the exit code and stdout.
@@ -70,6 +113,7 @@ impl Session {
             .env_remove("ZELLIJ_SESSION_NAME")
             .env_remove("ZELLIJ_PANE_ID")
             .env("XDG_STATE_HOME", self.state.path())
+            .env("LOCALAPPDATA", self.state.path())
             .arg("--session")
             .arg(&self.name)
             .args(args)
@@ -93,7 +137,8 @@ impl Session {
         let cwd = self.work.path().to_str().unwrap();
         let mut args = vec!["run", "--name", "fake", "--cwd", cwd, "--tab-id", "0"];
         args.extend(extra);
-        args.extend(["--", FAKE]);
+        let fake = fake();
+        args.extend(["--", &fake]);
         let (code, v) = self.json(&args);
         assert_eq!(code, 0, "{v}");
         let pane = v["pane"].as_str().unwrap().to_owned();
@@ -117,7 +162,9 @@ impl Drop for Session {
 
 #[test]
 fn run_send_wait_read_list_close() {
-    let s = Session::new("main");
+    let Some(s) = Session::new("main") else {
+        return;
+    };
     let pane = s.start_fake(&[]);
     assert!(pane.starts_with("terminal_"));
     assert_eq!(s.records(), 1);
@@ -164,7 +211,9 @@ fn run_send_wait_read_list_close() {
 
 #[test]
 fn stale_done_and_timeout() {
-    let s = Session::new("stale");
+    let Some(s) = Session::new("stale") else {
+        return;
+    };
     let pane = s.start_fake(&[]);
     s.json(&["send", &pane, "one"]);
     assert_eq!(s.json(&["wait", &pane, "--timeout", "10"]).0, 0);
@@ -187,7 +236,9 @@ fn stale_done_and_timeout() {
 
 #[test]
 fn blocked_then_keys() {
-    let s = Session::new("blocked");
+    let Some(s) = Session::new("blocked") else {
+        return;
+    };
     let pane = s.start_fake(&[]);
     s.json(&["send", &pane, "block"]);
     let (code, v) = s.json(&["wait", &pane, "--timeout", "10"]);
@@ -209,7 +260,9 @@ fn blocked_then_keys() {
 
 #[test]
 fn error_and_exit() {
-    let s = Session::new("exit");
+    let Some(s) = Session::new("exit") else {
+        return;
+    };
     let pane = s.start_fake(&[]);
     s.json(&["send", &pane, "fail"]);
     let (code, v) = s.json(&["wait", &pane, "--timeout", "10"]);
@@ -225,7 +278,9 @@ fn error_and_exit() {
 
 #[test]
 fn ownership_refusal_and_errors() {
-    let s = Session::new("owner");
+    let Some(s) = Session::new("owner") else {
+        return;
+    };
     // terminal_0 is the session's own shell; baton did not start it.
     let (code, v) = s.json(&["list"]);
     assert_eq!(code, 0);
@@ -287,10 +342,13 @@ fn ownership_refusal_and_errors() {
 
 #[test]
 fn agent_sets_session_id() {
-    let s = Session::new("agent");
+    let Some(s) = Session::new("agent") else {
+        return;
+    };
     let cwd = s.work.path().to_str().unwrap();
+    let fake = fake();
     let (code, v) = s.json(&[
-        "run", "--name", "c", "--cwd", cwd, "--tab-id", "0", "--agent", "claude", "--", FAKE,
+        "run", "--name", "c", "--cwd", cwd, "--tab-id", "0", "--agent", "claude", "--", &fake,
     ]);
     assert_eq!(code, 0, "{v}");
     let id = v["session_id"].as_str().unwrap();
@@ -308,13 +366,22 @@ fn agent_sets_session_id() {
         .iter()
         .map(|a| a.as_str().unwrap())
         .collect();
-    assert_eq!(cmd[0], "env");
-    let at = cmd.iter().position(|a| *a == FAKE).unwrap();
+    // The OS launcher comes first: `env -u …` on Unix, `baton exec --` on
+    // Windows.
+    if cfg!(unix) {
+        assert_eq!(cmd[0], "env");
+    } else {
+        assert_eq!(cmd[1..3], ["exec", "--"]);
+    }
+    let at = cmd.iter().position(|a| *a == fake).unwrap();
     assert_eq!(cmd[at + 1..], ["--session-id", id]);
 }
 
 #[test]
 fn missing_session() {
+    if !have_zellij() {
+        return;
+    }
     let out = cargo_bin_cmd!("baton")
         .env_remove("ZELLIJ_SESSION_NAME")
         .args(["--session", "baton-test-no-such-session", "list"])
@@ -339,15 +406,19 @@ fn missing_session() {
 
 #[test]
 fn run_unsets_claude_host_vars() {
-    let s = Session::with_env(
+    let Some(s) = Session::with_env(
         "hostvars",
         &[
             ("CLAUDECODE", "1"),
             ("CLAUDE_CODE_DISABLE_TERMINAL_TITLE", "1"),
             ("BATON_TEST_KEEP", "1"),
         ],
-    );
+    ) else {
+        return;
+    };
     let cwd = s.work.path().to_str().unwrap();
+    let file = s.work.path().join("env.txt");
+    let fake = fake();
     let (code, v) = s.json(&[
         "run",
         "--name",
@@ -357,12 +428,11 @@ fn run_unsets_claude_host_vars() {
         "--tab-id",
         "0",
         "--",
-        "sh",
-        "-c",
-        "env > env.txt; sleep 30",
+        &fake,
+        "env",
+        file.to_str().unwrap(),
     ]);
     assert_eq!(code, 0, "{v}");
-    let file = s.work.path().join("env.txt");
     let start = Instant::now();
     let text = loop {
         if let Ok(t) = std::fs::read_to_string(&file)
@@ -373,6 +443,26 @@ fn run_unsets_claude_host_vars() {
         assert!(start.elapsed() < Duration::from_secs(10), "no env.txt");
         sleep(Duration::from_millis(100));
     };
+    for var in CLAUDE_HOST_VARS {
+        assert!(!text.contains(&format!("{var}=")), "{var} leaked");
+    }
+}
+
+/// The launcher `run` uses on Windows, checked on every OS without Zellij.
+#[test]
+fn exec_unsets_claude_host_vars_and_keeps_exit_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("env.txt");
+    let out = cargo_bin_cmd!("baton")
+        .env("CLAUDECODE", "1")
+        .env("CLAUDE_CODE_DISABLE_TERMINAL_TITLE", "1")
+        .env("BATON_TEST_KEEP", "1")
+        .args(["exec", "--", &fake(), "env", file.to_str().unwrap(), "7"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(7));
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("BATON_TEST_KEEP=1"), "{text}");
     for var in CLAUDE_HOST_VARS {
         assert!(!text.contains(&format!("{var}=")), "{var} leaked");
     }

@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use crate::agent::{self, Agent};
 use crate::host::{Host, PaneInfo, Spawn};
 use crate::keys::key_bytes;
+use crate::launch::{self, Shell};
 use crate::now_ms;
 use crate::pane::PaneId;
 use crate::state::{State, WAITABLE, wait_exit_code};
@@ -106,7 +107,8 @@ pub const CLAUDE_HOST_VARS: [&str; 9] = [
     "CLAUDE_PID",
 ];
 
-/// Prefix a command with `env -u VAR …` for [`CLAUDE_HOST_VARS`].
+/// Prefix a command with `env -u VAR …` for [`CLAUDE_HOST_VARS`]. This is
+/// the Unix launcher; see [`crate::launch`] for Windows.
 ///
 /// ```
 /// let cmd = baton::commands::without_host_vars(vec!["pi".into()]);
@@ -145,19 +147,23 @@ pub fn run(ctx: &Ctx<'_>, args: RunArgs) -> Result<Outcome> {
         "give a command after --, or --agent"
     );
     let cwd = std::fs::canonicalize(&args.cwd)
+        .map(|p| launch::plain_path(&p))
         .with_context(|| format!("cannot use --cwd {}", args.cwd.display()))?;
     ensure!(cwd.is_dir(), "--cwd {} is not a folder", cwd.display());
     let (command, session_id) = match args.agent {
         Some(a) => agent::with_session_id(a, args.command, agent::new_uuid),
         None => (args.command, None),
     };
-    // Both paths (floating pane and new tab) start the program through `env`.
-    let command = without_host_vars(command);
+    // Both paths (floating pane and new tab) start the program through the
+    // OS launcher, without the Claude host variables.
+    let command = launch::clean_command(command)?;
 
     let (pane, tab_id) = if let Some(tab_name) = &args.new_tab {
         let tab = ctx.host.new_tab(tab_name, &cwd)?;
-        let pane = wait_for_shell(ctx.host, tab, Duration::from_secs(10))?;
-        ctx.host.write_text(pane, &shell_join(&command))?;
+        let shell = wait_for_shell(ctx.host, tab, Duration::from_secs(10))?;
+        let pane = shell.pane;
+        let line = Shell::detect(shell.command.as_deref()).join(&command)?;
+        ctx.host.write_text(pane, &line)?;
         ctx.host.write_bytes(pane, b"\r")?;
         (pane, tab)
     } else {
@@ -202,7 +208,7 @@ pub fn run(ctx: &Ctx<'_>, args: RunArgs) -> Result<Outcome> {
 }
 
 /// Wait until the new tab has a terminal pane with a running shell.
-fn wait_for_shell(host: &dyn Host, tab: u64, limit: Duration) -> Result<PaneId> {
+fn wait_for_shell(host: &dyn Host, tab: u64, limit: Duration) -> Result<PaneInfo> {
     let start = Instant::now();
     loop {
         let found = host
@@ -212,7 +218,7 @@ fn wait_for_shell(host: &dyn Host, tab: u64, limit: Duration) -> Result<PaneId> 
         if let Some(p) = found {
             // Give the shell a moment to print its prompt and read input.
             sleep(Duration::from_millis(300));
-            return Ok(p.pane);
+            return Ok(p);
         }
         if start.elapsed() > limit {
             bail!("tab {tab} has no shell after {}s", limit.as_secs());
