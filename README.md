@@ -8,6 +8,16 @@ Scope: mechanics only. `baton` does not create jj workspaces, read Beads or deci
 - Agent skill: [`skills/using-baton/SKILL.md`](skills/using-baton/SKILL.md)
 - Tasks: Beads in the agent-workflows store, `bd -C ~/projects/agent-workflows …` (bead `aw-i96` built v1).
 
+## Install from a release (no build tools)
+
+Each `v*` tag builds ready-to-use archives on GitHub Releases. Each archive holds the binary, `skills/using-baton` and this README.
+
+- **Windows (PowerShell):** download `baton-<version>-x86_64-pc-windows-msvc.zip` (browser, or `gh release download -R MrAldrin/baton -p "*windows*"`). Unzip, put `baton.exe` in `$HOME\.local\bin` and add that folder to your user PATH. Copy or junction `skills\using-baton` to `$HOME\.claude\skills\using-baton` and `$HOME\.pi\agent\skills\using-baton`.
+- **Linux and WSL:** download `baton-<version>-x86_64-unknown-linux-musl.tar.gz` (static, works on any x86_64 distribution). Unpack, put `baton` in `~/.local/bin`, and link `skills/using-baton` into `~/.claude/skills/` and `~/.pi/agent/skills/`.
+- Check: `baton --version`.
+
+To make a release: `jj tag set vX.Y.Z -r main && jj git push --tag vX.Y.Z` (or `git push origin vX.Y.Z`). Bump `version` in `Cargo.toml` first.
+
 ## Quick start
 
 ```bash
