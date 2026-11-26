@@ -94,12 +94,15 @@ impl Session {
             state: tempfile::tempdir().unwrap(),
             work: tempfile::tempdir().unwrap(),
         };
-        // Wait until the session answers. A Windows CI runner with several
-        // sessions in parallel can take more than 10 s.
+        // Wait until the session answers and shows its first pane. A
+        // session can answer `list` before `terminal_0` exists. A Windows CI
+        // runner with several sessions in parallel can take more than 10 s.
         let start = Instant::now();
         loop {
             let (code, out) = s.baton(&["list"]);
-            if code == 0 {
+            let has_pane = serde_json::from_str::<Value>(&out)
+                .is_ok_and(|v| v["panes"].as_array().is_some_and(|p| !p.is_empty()));
+            if code == 0 && has_pane {
                 break;
             }
             assert!(
