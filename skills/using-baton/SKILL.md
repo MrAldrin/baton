@@ -42,7 +42,7 @@ description: >
 
 - Use `--agent pi` or `--agent claude` for every agent. baton then sets a session ID, so the pane can be resumed later: `pi --session <id>` or `claude --resume <id>`.
 - Pi and Claude Code report their state themselves. baton removes the Claude Code host variables, so a started Claude Code reports its state.
-- On Windows, `--agent pi` also sets `PI_PROGRAM_STATUS=1`, so Pi reports its state through ConPTY. Started without `--agent pi`, Pi stays `unknown` and `wait` times out.
+- On Windows, `--agent pi` also sets `PI_PROGRAM_STATUS=1`, so Pi reports its state even on Zellij 0.46.0.
 - In a new, untrusted folder, Claude Code first asks for trust. That prompt shows as `unknown`, not `blocked`. Read the pane to see it.
 
 ## Send, then wait
