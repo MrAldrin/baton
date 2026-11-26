@@ -1,0 +1,4 @@
+# A test that hangs (a Zellij session that never gets ready) fails after
+# 2 minutes instead of blocking CI for hours.
+[profile.default]
+slow-timeout = { period = "30s", terminate-after = 4 }
