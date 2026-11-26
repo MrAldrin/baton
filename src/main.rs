@@ -121,6 +121,9 @@ enum Verb {
     /// with its exit code. `run` uses this inside the pane on Windows.
     #[command(hide = true)]
     Exec {
+        /// `KEY=VALUE` to set for the program when `KEY` is not set yet.
+        #[arg(long = "default-env")]
+        default_env: Vec<String>,
         #[arg(last = true, required = true)]
         command: Vec<String>,
     },
@@ -161,8 +164,12 @@ fn print_error(message: &str) {
 
 fn execute(cli: Cli) -> Result<commands::Outcome> {
     // `exec` runs inside a pane and needs no session.
-    if let Verb::Exec { command } = &cli.verb {
-        let code = launch::exec(command)?;
+    if let Verb::Exec {
+        command,
+        default_env,
+    } = &cli.verb
+    {
+        let code = launch::exec(command, default_env)?;
         std::process::exit(code);
     }
     let env_session = std::env::var("ZELLIJ_SESSION_NAME")

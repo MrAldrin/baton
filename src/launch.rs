@@ -16,14 +16,31 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
+use crate::agent::Agent;
 use crate::commands::{CLAUDE_HOST_VARS, without_host_vars};
 
+/// Variables an agent gets when they are not set yet in the pane.
+///
+/// Pi reports its state with OSC 7501 only after the terminal answers its
+/// feature query (`ESC ] 7501 ; ? ESC \`). On Windows the answer does not
+/// pass back through `ConPTY`, so Pi stays silent and `wait` times out.
+/// `PI_PROGRAM_STATUS=1` makes Pi skip the query; `baton` only runs it in
+/// Zellij, which reads OSC 7501.
+#[must_use]
+pub fn default_env(agent: Option<Agent>) -> &'static [&'static str] {
+    match agent {
+        Some(Agent::Pi) => &["PI_PROGRAM_STATUS=1"],
+        _ => &[],
+    }
+}
+
 /// The command that a pane runs for `command`: the OS launcher in front of
-/// it, so the program starts without [`CLAUDE_HOST_VARS`].
+/// it, so the program starts without [`CLAUDE_HOST_VARS`]. On Windows the
+/// launcher also sets [`default_env`] for `agent`.
 ///
 /// # Errors
 /// On Windows, the path of the running `baton` is not known.
-pub fn clean_command(command: Vec<String>) -> Result<Vec<String>> {
+pub fn clean_command(command: Vec<String>, agent: Option<Agent>) -> Result<Vec<String>> {
     if cfg!(unix) {
         Ok(without_host_vars(command))
     } else {
@@ -31,8 +48,12 @@ pub fn clean_command(command: Vec<String>) -> Result<Vec<String>> {
         let mut out = vec![
             plain_path(&exe).to_string_lossy().into_owned(),
             "exec".to_owned(),
-            "--".to_owned(),
         ];
+        for pair in default_env(agent) {
+            out.push("--default-env".to_owned());
+            out.push((*pair).to_owned());
+        }
+        out.push("--".to_owned());
         out.extend(command);
         Ok(out)
     }
@@ -43,13 +64,16 @@ pub fn clean_command(command: Vec<String>) -> Result<Vec<String>> {
 ///
 /// # Errors
 /// The command is empty or cannot start.
-pub fn exec(command: &[String]) -> Result<i32> {
+pub fn exec(command: &[String], default_env: &[String]) -> Result<i32> {
     let (program, args) = command.split_first().context("give a command after --")?;
     // Rust runs a `.bat`/`.cmd` path through cmd.exe with safe quoting.
     let mut cmd = Command::new(resolve(program));
     cmd.args(args);
     for var in CLAUDE_HOST_VARS {
         cmd.env_remove(var);
+    }
+    for (key, value) in missing_env(default_env, |k| std::env::var_os(k).is_some()) {
+        cmd.env(key, value);
     }
     #[cfg(unix)]
     {
@@ -66,6 +90,16 @@ pub fn exec(command: &[String]) -> Result<i32> {
             .with_context(|| format!("cannot start {program}"))?;
         Ok(status.code().unwrap_or(1))
     }
+}
+
+/// The `KEY=VALUE` pairs whose `KEY` is not set (`is_set` says false).
+/// A value the user set wins. Pairs without `=` are skipped.
+fn missing_env(pairs: &[String], is_set: impl Fn(&str) -> bool) -> Vec<(&str, &str)> {
+    pairs
+        .iter()
+        .filter_map(|p| p.split_once('='))
+        .filter(|(k, _)| !k.is_empty() && !is_set(k))
+        .collect()
 }
 
 #[cfg(windows)]
@@ -201,12 +235,34 @@ mod tests {
 
     #[test]
     fn clean_command_on_this_os() {
-        let cmd = clean_command(w(&["pi"])).unwrap();
+        let cmd = clean_command(w(&["pi"]), None).unwrap();
         assert_eq!(cmd.last().unwrap(), "pi");
         if cfg!(unix) {
             assert_eq!(cmd[0], "env");
         } else {
             assert_eq!(cmd[1..3], ["exec", "--"]);
+            let pi = clean_command(w(&["pi"]), Some(Agent::Pi)).unwrap();
+            assert_eq!(
+                pi[1..5],
+                ["exec", "--default-env", "PI_PROGRAM_STATUS=1", "--"]
+            );
         }
+    }
+
+    #[test]
+    fn pi_gets_program_status_unless_set() {
+        assert_eq!(default_env(Some(Agent::Pi)), ["PI_PROGRAM_STATUS=1"]);
+        assert_eq!(default_env(Some(Agent::Claude)), [] as [&str; 0]);
+        assert_eq!(default_env(None), [] as [&str; 0]);
+        let pairs = w(&["PI_PROGRAM_STATUS=1", "A=x=y", "bad", "=v"]);
+        assert_eq!(
+            missing_env(&pairs, |_| false),
+            [("PI_PROGRAM_STATUS", "1"), ("A", "x=y")]
+        );
+        // A value the user set is kept.
+        assert_eq!(
+            missing_env(&pairs, |k| k == "PI_PROGRAM_STATUS"),
+            [("A", "x=y")]
+        );
     }
 }

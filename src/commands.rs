@@ -156,7 +156,7 @@ pub fn run(ctx: &Ctx<'_>, args: RunArgs) -> Result<Outcome> {
     };
     // Both paths (floating pane and new tab) start the program through the
     // OS launcher, without the Claude host variables.
-    let command = launch::clean_command(command)?;
+    let command = launch::clean_command(command, args.agent)?;
 
     let (pane, tab_id) = if let Some(tab_name) = &args.new_tab {
         // The tab's pane runs the command itself, so no shell (Nushell,
