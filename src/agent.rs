@@ -26,6 +26,9 @@ impl Agent {
     }
 }
 
+/// Script runners: the agent's own arguments start after their script path.
+const INTERPRETERS: [&str; 6] = ["node", "bun", "deno", "python", "python3", "py"];
+
 /// Flags that already choose a session; `baton` then adds no id.
 const SESSION_FLAGS: [&str; 6] = ["--resume", "-r", "--continue", "-c", "--session", "--fork"];
 
@@ -34,6 +37,11 @@ const SESSION_FLAGS: [&str; 6] = ["--resume", "-r", "--continue", "-c", "--sessi
 /// Returns the command to run and the session id, if known. An id the
 /// caller already gave with `--session-id` is kept. When the command
 /// already resumes or continues a session, nothing is added.
+///
+/// The id goes right after the program. When the program is a script runner
+/// such as `node launch.mjs`, it goes after the script, so the runner does
+/// not read it as its own option. Runner options that take a separate value
+/// (`node -r x launch.mjs`) are not recognized: give `--session-id` yourself.
 ///
 /// ```
 /// use baton::agent::{Agent, with_session_id};
@@ -65,8 +73,27 @@ pub fn with_session_id(
         return (command, None);
     }
     let id = new_id();
-    command.splice(1..1, ["--session-id".to_owned(), id.clone()]);
+    let at = agent_args_start(&command);
+    command.splice(at..at, ["--session-id".to_owned(), id.clone()]);
     (command, Some(id))
+}
+
+/// Index of the first argument that belongs to the agent itself.
+fn agent_args_start(command: &[String]) -> usize {
+    let program = std::path::Path::new(&command[0])
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !INTERPRETERS.contains(&program.as_str()) {
+        return 1;
+    }
+    // Skip the runner's own flags, then the script path.
+    command
+        .iter()
+        .skip(1)
+        .position(|a| !a.starts_with('-'))
+        .map_or(command.len(), |i| i + 2)
 }
 
 /// A random UUID v4 (Claude Code needs a UUID).
@@ -148,6 +175,50 @@ mod tests {
         );
         assert_eq!(cmd, v(&["claude", "--resume", "r1"]));
         assert_eq!(id, None);
+    }
+
+    #[test]
+    fn script_runner_gets_the_id_after_the_script() {
+        let (cmd, _) = with_session_id(
+            Agent::Pi,
+            v(&["node", "C:/pi/launch.mjs", "--name", "b1", "go"]),
+            || "x".into(),
+        );
+        assert_eq!(
+            cmd,
+            v(&[
+                "node",
+                "C:/pi/launch.mjs",
+                "--session-id",
+                "x",
+                "--name",
+                "b1",
+                "go"
+            ])
+        );
+        let (cmd, _) = with_session_id(
+            Agent::Pi,
+            v(&["C:/Program Files/nodejs/NODE.EXE", "--no-warnings", "l.mjs"]),
+            || "x".into(),
+        );
+        assert_eq!(
+            cmd,
+            v(&[
+                "C:/Program Files/nodejs/NODE.EXE",
+                "--no-warnings",
+                "l.mjs",
+                "--session-id",
+                "x"
+            ])
+        );
+    }
+
+    #[test]
+    fn launcher_scripts_and_wrappers_get_the_id_after_the_program() {
+        for program in ["pi.cmd", "/usr/bin/pi", "claude.exe"] {
+            let (cmd, _) = with_session_id(Agent::Pi, v(&[program, "hi"]), || "x".into());
+            assert_eq!(cmd, v(&[program, "--session-id", "x", "hi"]));
+        }
     }
 
     #[test]

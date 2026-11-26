@@ -57,7 +57,7 @@ Records: `$XDG_STATE_HOME/baton/<session>~<pane>.json` (default `~/.local/state/
 
 ## Agents
 
-- `--agent pi|claude` adds `--session-id <uuid>`, so a pane can be resumed later (`pi --session <id>`, `claude --resume <id>`).
+- `--agent pi|claude` adds `--session-id <uuid>`, so a pane can be resumed later (`pi --session <id>`, `claude --resume <id>`). For a script runner such as `node launch.mjs`, the flag goes after the script.
 - Pi and Claude Code report their state themselves (OSC 7501).
 - On Windows, use Zellij 0.46.1: with 0.46.0 the answer to the agents' OSC 7501 feature query is lost, and Claude Code reports no state. `run --agent pi` also sets `PI_PROGRAM_STATUS=1` (unless set), so Pi reports even then.
 - `run` starts every program through `env -u …` without the variables a Claude Code host sets for its children (list: `CLAUDE_HOST_VARS` in `src/commands.rs`). Inherited, they make Claude Code a child session that sends no state (`CLAUDE_CODE_DISABLE_TERMINAL_TITLE`). Auth and account variables are kept.
