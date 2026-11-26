@@ -47,11 +47,12 @@ pub trait Host {
     /// The multiplexer refuses or does not return a pane id.
     fn spawn_floating(&self, spawn: &Spawn<'_>) -> Result<PaneId>;
 
-    /// Open a new tab with a shell in `cwd`, and return its tab id.
+    /// Open a new tab in `cwd` whose pane runs `command` directly (no
+    /// shell in between), and return its tab id.
     ///
     /// # Errors
     /// The multiplexer refuses or does not return a tab id.
-    fn new_tab(&self, name: &str, cwd: &Path) -> Result<u64>;
+    fn new_tab(&self, name: &str, cwd: &Path, command: &[String]) -> Result<u64>;
 
     /// Type text into a pane, without Enter.
     ///

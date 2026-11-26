@@ -27,7 +27,8 @@ description: >
 | `list` | `baton list --owned` |
 | `close` | `baton close terminal_3` |
 
-- `run` opens a floating pane without focus. Default: in the caller's own tab. Outside Zellij, give `--tab-id T`. `--new-tab NAME` opens a new tab.
+- `run` opens a floating pane without focus. Default: in the caller's own tab. Outside Zellij, give `--tab-id T`. `--new-tab NAME` opens a new tab that runs the command directly (any default shell works).
+- If Claude Code stops at its first-run theme picker, the CLI was never set up on that machine. Ask the user to run `claude` once by hand; do not pick options for them.
 - `run` prints `{pane, tab_id, session_id?}`. Record the pane and the session ID.
 - `run --agent pi|claude` with no command starts that agent. With a command after `--`, it adds a session ID to that command.
 - `send --no-enter` types the text and does not submit it.

@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use crate::agent::{self, Agent};
 use crate::host::{Host, PaneInfo, Spawn};
 use crate::keys::key_bytes;
-use crate::launch::{self, Shell};
+use crate::launch;
 use crate::now_ms;
 use crate::pane::PaneId;
 use crate::state::{State, WAITABLE, wait_exit_code};
@@ -159,12 +159,10 @@ pub fn run(ctx: &Ctx<'_>, args: RunArgs) -> Result<Outcome> {
     let command = launch::clean_command(command)?;
 
     let (pane, tab_id) = if let Some(tab_name) = &args.new_tab {
-        let tab = ctx.host.new_tab(tab_name, &cwd)?;
-        let shell = wait_for_shell(ctx.host, tab, Duration::from_secs(10))?;
-        let pane = shell.pane;
-        let line = Shell::detect(shell.command.as_deref()).join(&command)?;
-        ctx.host.write_text(pane, &line)?;
-        ctx.host.write_bytes(pane, b"\r")?;
+        // The tab's pane runs the command itself, so no shell (Nushell,
+        // PowerShell, cmd.exe, …) has to parse a typed command line.
+        let tab = ctx.host.new_tab(tab_name, &cwd, &command)?;
+        let pane = wait_for_pane(ctx.host, tab, Duration::from_secs(10))?.pane;
         (pane, tab)
     } else {
         let tab = if let Some(t) = args.tab_id {
@@ -207,21 +205,19 @@ pub fn run(ctx: &Ctx<'_>, args: RunArgs) -> Result<Outcome> {
     Ok(Outcome::json(out))
 }
 
-/// Wait until the new tab has a terminal pane with a running shell.
-fn wait_for_shell(host: &dyn Host, tab: u64, limit: Duration) -> Result<PaneInfo> {
+/// Wait until the new tab has its terminal pane.
+fn wait_for_pane(host: &dyn Host, tab: u64, limit: Duration) -> Result<PaneInfo> {
     let start = Instant::now();
     loop {
         let found = host
             .list_panes()?
             .into_iter()
-            .find(|p| p.tab_id == Some(tab) && p.command.is_some());
+            .find(|p| p.tab_id == Some(tab));
         if let Some(p) = found {
-            // Give the shell a moment to print its prompt and read input.
-            sleep(Duration::from_millis(300));
             return Ok(p);
         }
         if start.elapsed() > limit {
-            bail!("tab {tab} has no shell after {}s", limit.as_secs());
+            bail!("tab {tab} has no pane after {}s", limit.as_secs());
         }
         sleep(Duration::from_millis(200));
     }
@@ -458,6 +454,7 @@ mod tests {
     struct FakeHost {
         statuses: RefCell<Vec<Status>>,
         writes: RefCell<Vec<Vec<u8>>>,
+        tab_command: RefCell<Vec<String>>,
     }
 
     impl FakeHost {
@@ -465,6 +462,7 @@ mod tests {
             Self {
                 statuses: RefCell::new(statuses),
                 writes: RefCell::new(Vec::new()),
+                tab_command: RefCell::new(Vec::new()),
             }
         }
     }
@@ -493,8 +491,9 @@ mod tests {
         fn spawn_floating(&self, _: &Spawn<'_>) -> Result<PaneId> {
             Ok(PaneId(1))
         }
-        fn new_tab(&self, _: &str, _: &Path) -> Result<u64> {
-            Ok(1)
+        fn new_tab(&self, _: &str, _: &Path, command: &[String]) -> Result<u64> {
+            *self.tab_command.borrow_mut() = command.to_vec();
+            Ok(0)
         }
         fn write_text(&self, _: PaneId, text: &str) -> Result<()> {
             self.writes.borrow_mut().push(text.as_bytes().to_vec());
@@ -541,6 +540,30 @@ mod tests {
 
     const UNTIL: [State; 4] = [State::Done, State::Blocked, State::Error, State::Exited];
     const POLL: Duration = Duration::from_millis(1);
+
+    #[test]
+    fn new_tab_runs_command_without_typing_into_a_shell() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::at(tmp.path().join("s"));
+        let host = FakeHost::new(vec![Status::unknown()]);
+        let ctx = Ctx {
+            host: &host,
+            store: &store,
+            caller_pane: None,
+        };
+        let args = RunArgs {
+            name: "a".into(),
+            cwd: tmp.path().to_path_buf(),
+            tab_id: None,
+            new_tab: Some("t".into()),
+            agent: None,
+            command: vec!["pi".into(), "it's".into()],
+        };
+        run(&ctx, args).unwrap();
+        assert!(host.writes.borrow().is_empty(), "nothing typed");
+        let cmd = host.tab_command.borrow();
+        assert_eq!(cmd[cmd.len() - 2..], ["pi", "it's"]);
+    }
 
     #[test]
     fn wait_skips_stale_done() {

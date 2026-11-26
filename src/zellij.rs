@@ -106,9 +106,11 @@ impl Host for Zellij {
             .context("zellij new-pane did not return a terminal pane id")
     }
 
-    fn new_tab(&self, name: &str, cwd: &Path) -> Result<u64> {
+    fn new_tab(&self, name: &str, cwd: &Path, command: &[String]) -> Result<u64> {
         let cwd = cwd.to_string_lossy();
-        let out = self.action(&["new-tab", "--no-focus", "--name", name, "--cwd", &cwd])?;
+        let mut args = vec!["new-tab", "--no-focus", "--name", name, "--cwd", &cwd, "--"];
+        args.extend(command.iter().map(String::as_str));
+        let out = self.action(&args)?;
         let text = String::from_utf8_lossy(&out.stdout);
         text.trim()
             .parse()

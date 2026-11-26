@@ -28,7 +28,7 @@ Global option `--session S`; default `$ZELLIJ_SESSION_NAME`; error if neither is
 
 | Verb | Does | Zellij 0.46.1 under it |
 |---|---|---|
-| `baton run --name N --cwd D [--tab-id T \| --new-tab NAME] [--agent pi\|claude] -- <cmd…>` | Start a program without focus. Default: a floating pane in the caller's own tab (found through `$ZELLIJ_PANE_ID`); otherwise `--tab-id` is required. `--new-tab` opens a tab, waits for its shell, then types the command. Records ownership. Returns `{pane, tab_id, session_id?}` | `action new-pane --floating --no-focus --tab-id --name --cwd -- cmd`; `action new-tab --no-focus --name --cwd` |
+| `baton run --name N --cwd D [--tab-id T \| --new-tab NAME] [--agent pi\|claude] -- <cmd…>` | Start a program without focus. Default: a floating pane in the caller's own tab (found through `$ZELLIJ_PANE_ID`); otherwise `--tab-id` is required. `--new-tab` opens a tab whose pane runs the command directly (no shell). Records ownership. Returns `{pane, tab_id, session_id?}` | `action new-pane --floating --no-focus --tab-id --name --cwd -- cmd`; `action new-tab --no-focus --name --cwd -- cmd` |
 | `baton send <pane> <text> [--no-enter] [--force]` | Type text and submit. Refuses when the state is `working` or `blocked`, unless `--force`. Records the send time | `action write-chars`, then `action write 13` |
 | `baton keys <pane> <key…> [--force]` | Send keys: `enter`, `esc`, `tab`, `up`, `down`, `ctrl-c`, digits. Records the send time, like `send` | `action write <bytes>` |
 | `baton read <pane> [--full] [--lines N]` | The pane's text | `action dump-screen [--full]` (prints to stdout) |
@@ -66,6 +66,7 @@ One JSON file per pane in `$XDG_STATE_HOME/baton/` (default `~/.local/state/bato
 ## Known limits
 
 - Claude Code's folder-trust prompt (first start in an untrusted folder) shows as `unknown`, not `blocked`. Fix later.
+- Claude Code's first-run setup (theme picker, login) appears when the Claude Code CLI was never started interactively on the machine (`~/.claude.json` has no `theme` or `hasCompletedOnboarding`), for example when only the desktop app was used. `baton` keeps `HOME`, `CLAUDE_CONFIG_DIR` and the auth variables, so this is not caused by `baton`. Run `claude` once by hand and finish the setup.
 - A headless session (`attach --create-background`, no client) does not create new tabs: `new-tab` returns an id but no tab appears. Tests use floating panes in tab 0.
 - `zellij events` carries no agent state, so `wait` polls. A Zellij plugin could push changes later.
 - `dump-screen` of a small floating pane wraps text. Full replies are better read from the agent's own session file (later).
@@ -76,7 +77,8 @@ One JSON file per pane in `$XDG_STATE_HOME/baton/` (default `~/.local/state/bato
 - `zellij --session S action …` exits 0 for an unknown session (it prints the session list on stdout) and for an unknown pane id. `baton` checks that the session (`list-sessions`) and the pane (`list-panes`) exist first.
 - An exited pane clears `program_status`; `attention.status` is then `Failed`, so the `exited` check comes first.
 
-- `--new-tab` types the command into the tab's shell. Unix: POSIX quoting. Windows: the shell is found from the pane command: PowerShell (`pwsh`, `powershell`) gets `& 'word' …` (a `'` is doubled); `cmd.exe` gets `"word"` and refuses words with `"`, `%` or a line break; any other shell gets POSIX quoting.
+- `--new-tab` gives the command to `new-tab -- cmd…`, so the user's default shell (Nushell, PowerShell, cmd.exe, fish …) never parses it. Typing a quoted line into the shell failed in Nushell (`'C:\…aton.exe' exec …` needs `^'…'` there). When the program ends, the pane shows it as exited, as a floating pane does.
+- Windows: `baton exec` finds the program through `PATH` and `PATHEXT`, so npm shims such as `pi.cmd` start (Rust runs a `.cmd`/`.bat` path through cmd.exe). An extensionless POSIX shim next to it is never picked.
 - Windows (ConPTY) is not checked live yet: whether OSC 7501 passes through ConPTY to Zellij, and whether `list-panes --json` and `dump-screen` behave as on Linux. See bead `aw-n8x.2`.
 
 ## Not in v1
