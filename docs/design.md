@@ -79,7 +79,7 @@ One JSON file per pane in `$XDG_STATE_HOME/baton/` (default `~/.local/state/bato
 
 - `--new-tab` gives the command to `new-tab -- cmd…`, so the user's default shell (Nushell, PowerShell, cmd.exe, fish …) never parses it. Typing a quoted line into the shell failed in Nushell (`'C:\…aton.exe' exec …` needs `^'…'` there). When the program ends, the pane shows it as exited, as a floating pane does.
 - Windows: `baton exec` finds the program through `PATH` and `PATHEXT`, so npm shims such as `pi.cmd` start (Rust runs a `.cmd`/`.bat` path through cmd.exe). An extensionless POSIX shim next to it is never picked.
-- Windows (ConPTY), checked live with Pi 1.6.1 and Zellij 0.46.0: OSC 7501 output passes through ConPTY to Zellij, and `list-panes --json` and `dump-screen` work. The terminal's answer to Pi's feature query (`ESC ] 7501 ; ? ESC \`) does not reach Pi, so Pi would report no state. `run --agent pi` therefore starts Pi with `PI_PROGRAM_STATUS=1` (`exec --default-env`), unless that variable is already set in the pane. Unix is unchanged: there the query answer arrives.
+- Windows (ConPTY) needs Zellij 0.46.1. Checked live with Pi 1.6.1 and Claude Code 2.1.332: OSC 7501 output passes through ConPTY to Zellij, and `list-panes --json` and `dump-screen` work. With Zellij 0.46.0 the answer to the agents' feature query (`ESC ] 7501 ; ? ESC \`) is lost, so they report no state (Claude Code has no override and stays `unknown`). Zellij 0.46.1 delivers the answer: Claude Code and Pi reported `idle` → `done`, floating and `--new-tab`. `run --agent pi` still starts Pi with `PI_PROGRAM_STATUS=1` (`exec --default-env`) unless the pane sets it; this is harmless and helps on 0.46.0.
 
 ## Not in v1
 

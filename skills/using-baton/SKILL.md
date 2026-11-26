@@ -10,6 +10,7 @@ description: >
 
 ## Before you start
 
+- On Windows, Zellij must be 0.46.1 or later; with 0.46.0 Claude Code stays `unknown` and `wait` cannot work.
 - baton needs a session: `--session S`, or `$ZELLIJ_SESSION_NAME` (set inside Zellij). With neither, it stops with an error.
 - A pane is `terminal_N` or `N`. Use the pane ID that `run` returns. Never find a pane from focus.
 - Output is one JSON object on stdout. `read` prints plain text unless `--json`. Errors print `{"error": {"message": …}}` and exit `3`.
