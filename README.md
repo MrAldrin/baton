@@ -42,7 +42,7 @@ Inside Zellij, `--session` defaults to `$ZELLIJ_SESSION_NAME`, and `run` opens a
 | `read <pane> [--full] [--lines N] [--json]` | The pane's text. |
 | `status <pane>` | `{state, source, app, message, updated_ms, exit_code}`. |
 | `wait <pane> [--until done,blocked,error,exited] [--timeout S]` | Block until a state is reached after the last send. |
-| `list [--owned]` | Terminal panes with name, command, cwd and state. |
+| `list [--owned]` | Terminal panes with name, title, command, cwd and state. For a pane `baton` owns, `name` is the `run --name`; `title` is the live pane title, which agents change. |
 | `close <pane> [--force]` | Close a pane `baton` started. |
 
 `--force` is needed to write to or close a pane that `baton` did not start.

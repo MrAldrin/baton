@@ -402,10 +402,14 @@ pub fn list(ctx: &Ctx<'_>, owned_only: bool) -> Result<Outcome> {
     Ok(Outcome::json(json!({ "panes": rows })))
 }
 
+/// `name` is the `run --name` of a pane `baton` owns: agents (Pi) change
+/// the live pane title, which is kept in `title`.
 fn list_row(p: &PaneInfo, rec: Option<&Record>) -> Value {
+    let name = rec.filter(|r| r.owned).map_or(&p.name, |r| &r.name);
     json!({
         "pane": p.pane,
-        "name": p.name,
+        "name": name,
+        "title": p.name,
         "command": p.command,
         "cwd": p.cwd,
         "tab_id": p.tab_id,
@@ -563,6 +567,48 @@ mod tests {
         assert!(host.writes.borrow().is_empty(), "nothing typed");
         let cmd = host.tab_command.borrow();
         assert_eq!(cmd[cmd.len() - 2..], ["pi", "it's"]);
+    }
+
+    #[test]
+    fn list_shows_run_name_not_live_title() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::at(tmp.path().join("s"));
+        let host = FakeHost::new(vec![Status::unknown()]);
+        let ctx = Ctx {
+            host: &host,
+            store: &store,
+            caller_pane: None,
+        };
+        let row = |owned_only| {
+            let Output::Json(v) = list(&ctx, owned_only).unwrap().output else {
+                panic!("list prints JSON");
+            };
+            v["panes"][0].clone()
+        };
+        // Not owned: the live title is the name.
+        let first = row(false);
+        assert_eq!(first["name"], "a");
+        // Owned, run as "wt-1"; the agent has since set the title to "a".
+        let mut rec = Record {
+            owned: true,
+            session: "fake".into(),
+            pane: PaneId(1),
+            name: "wt-1".into(),
+            cwd: "/".into(),
+            command: vec!["pi".into()],
+            agent: None,
+            session_id: None,
+            tab_id: 0,
+            started_ms: 0,
+            last_send_ms: None,
+        };
+        store.save(&rec).unwrap();
+        let owned = row(true);
+        assert_eq!(owned["name"], "wt-1");
+        assert_eq!(owned["title"], "a");
+        rec.owned = false;
+        store.save(&rec).unwrap();
+        assert_eq!(row(false)["name"], "a");
     }
 
     #[test]

@@ -34,7 +34,7 @@ Global option `--session S`; default `$ZELLIJ_SESSION_NAME`; error if neither is
 | `baton read <pane> [--full] [--lines N]` | The pane's text | `action dump-screen [--full]` (prints to stdout) |
 | `baton status <pane>` | `{state, source, app, message, updated_ms, exit_code}`. States: `idle`, `working`, `blocked`, `done`, `error`, `exited`, `unknown` | `list-panes --all --json` |
 | `baton wait <pane> [--until done,blocked,error,exited] [--timeout S]` | Block until a listed state is reached **after the last send**. Poll every 0.5 s | `status` in a loop |
-| `baton list [--owned]` | Terminal panes with name, command, cwd and state | `list-panes --all --json` |
+| `baton list [--owned]` | Terminal panes with name, title, command, cwd and state. Owned panes: `name` is the `run --name` from the record (Pi sets the pane title, so the live title cannot find a pane); `title` is the live title | `list-panes --all --json` |
 | `baton close <pane> [--force]` | Close a pane `baton` started; `--force` for others. Removes its record | `action close-pane` |
 
 Exit codes for `wait`: `0` done or idle, `1` error or exited, `2` blocked (waits for a person), `124` timeout, `3` other error.

@@ -25,7 +25,7 @@ description: >
 | `wait` | `baton wait terminal_3 --timeout 600` |
 | `read` | `baton read terminal_3 --lines 40` |
 | `status` | `baton status terminal_3` |
-| `list` | `baton list --owned` |
+| `list` | `baton list --owned` (find a pane by `.name`, the `run --name`; `.title` is the live title) |
 | `close` | `baton close terminal_3` |
 
 - `run` opens a floating pane without focus. Default: in the caller's own tab. Outside Zellij, give `--tab-id T`. `--new-tab NAME` opens a new tab that runs the command directly (any default shell works).
